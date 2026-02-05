@@ -1,0 +1,99 @@
+name: 'Maos AgentGate: CI Quality Gatekeeper for AI Agents'
+description: 'CI Gatekeeper for AI Agents. Blocks PRs if accuracy drops below threshold.'
+author: 'Maosproject (sam@maosproject.io | https://maosproject.io)'
+branding:
+  icon: 'shield'
+  color: 'blue'
+
+inputs:
+  # --- Mandatory ---
+  openai_api_key:
+    description: 'API Key for the Judge Model (e.g., GPT-4)'
+    required: true
+  
+  system_prompt:
+    description: 'Path to your agent system prompt file'
+    required: true
+    default: 'prompts/system.txt'
+  
+  test_cases:
+    description: 'Path to your golden dataset (JSON)'
+    required: true
+    default: 'tests/expected.json'
+
+  # --- Tuning ---
+  threshold:
+    description: 'Minimum passing score (0-100). Fails build if lower.'
+    required: false
+    default: '90'
+  
+  model:
+    description: 'The LLM to test against (e.g., gpt-3.5-turbo, gpt-4)'
+    required: false
+    default: 'openai:gpt-4o-mini'
+
+outputs:
+  score:
+    description: 'The final evaluation score (0-100)'
+    value: ${{ steps.score.outputs.val }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Evaluation Engine
+      shell: bash
+      run: npm install -g promptfoo@latest
+
+    # We dynamically generate the config so the user doesn't have to learn promptfoo syntax
+    - name: Generate Config
+      shell: bash
+      run: |
+        cat <<EOF > maos_eval_config.yaml
+        prompts: [${{ inputs.system_prompt }}]
+        providers: [${{ inputs.model }}]
+        tests: ${{ inputs.test_cases }}
+        defaultTest:
+          assert:
+            # The Default Judge: Checks if the output aligns with the prompt's intent
+            - type: llm-rubric
+              value: "Does the response follow the instructions in the system prompt?"
+        EOF
+
+    - name: Run Evaluation
+      id: eval
+      shell: bash
+      env:
+        OPENAI_API_KEY: ${{ inputs.openai_api_key }}
+        # Support other providers if needed
+        ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
+      run: |
+        echo "::group::Running Maos Eval..."
+        npx promptfoo eval -c maos_eval_config.yaml --output output.json --no-progress
+        echo "::endgroup::"
+
+    - name: Check Threshold
+      id: score
+      shell: bash
+      run: |
+        # Extract Success Rate using jq (pre-installed on runners)
+        SCORE=$(jq '.results.stats.successes / .results.stats.total * 100' output.json)
+        
+        # Round to integer
+        SCORE_INT=${SCORE%.*}
+        
+        echo "val=$SCORE_INT" >> $GITHUB_OUTPUT
+        
+        echo "📊 Final Score: $SCORE_INT%"
+        echo "🎯 Threshold: ${{ inputs.threshold }}%"
+        
+        if [ "$SCORE_INT" -lt "${{ inputs.threshold }}" ]; then
+          echo "::error::❌ Agent Quality FAILED. Score ($SCORE_INT%) is below threshold (${{ inputs.threshold }}%)."
+          exit 1
+        else
+          echo "::notice::✅ Agent Quality PASSED."
+        fi
