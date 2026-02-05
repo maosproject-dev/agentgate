@@ -8,7 +8,7 @@ branding:
 inputs:
   # --- Mandatory ---
   openai_api_key:
-    description: 'API Key for the Judge Model (e.g., GPT-4)'
+    description: 'API Key for the Judge Model'
     required: true
   
   system_prompt:
@@ -28,9 +28,19 @@ inputs:
     default: '90'
   
   model:
-    description: 'The LLM to test against (e.g., gpt-3.5-turbo, gpt-4)'
+    description: 'The LLM to test against (e.g., openai:gpt-4o-mini, openai:gpt-4o)'
     required: false
     default: 'openai:gpt-4o-mini'
+
+  temperature:
+    description: 'LLM Temperature (0.0 = Deterministic)'
+    required: false
+    default: '0.0'
+
+  repetitions:
+    description: 'Number of times to run each test to smooth out noise'
+    required: false
+    default: '1'
 
 outputs:
   score:
@@ -49,13 +59,16 @@ runs:
       shell: bash
       run: npm install -g promptfoo@latest
 
-    # We dynamically generate the config so the user doesn't have to learn promptfoo syntax
+    # Config Generation: Now correctly uses the 'model' input
     - name: Generate Config
       shell: bash
       run: |
         cat <<EOF > maos_eval_config.yaml
         prompts: [${{ inputs.system_prompt }}]
-        providers: [${{ inputs.model }}]
+        providers:
+          - id: "${{ inputs.model }}"
+            config:
+              temperature: ${{ inputs.temperature }}
         tests: ${{ inputs.test_cases }}
         defaultTest:
           assert:
@@ -69,21 +82,25 @@ runs:
       shell: bash
       env:
         OPENAI_API_KEY: ${{ inputs.openai_api_key }}
-        # Support other providers if needed
         ANTHROPIC_API_KEY: ${{ env.ANTHROPIC_API_KEY }}
       run: |
         echo "::group::Running Maos Eval..."
-        npx promptfoo eval -c maos_eval_config.yaml --output output.json --no-progress
+        # We use the CLI flag --repeat for stability
+        npx promptfoo eval \
+          -c maos_eval_config.yaml \
+          --output output.json \
+          --no-progress \
+          --repeat ${{ inputs.repetitions }}
         echo "::endgroup::"
 
     - name: Check Threshold
       id: score
       shell: bash
       run: |
-        # Extract Success Rate using jq (pre-installed on runners)
+        # Extract Success Rate using jq
         SCORE=$(jq '.results.stats.successes / .results.stats.total * 100' output.json)
         
-        # Round to integer
+        # Round to integer (Bash cannot handle floats in comparison)
         SCORE_INT=${SCORE%.*}
         
         echo "val=$SCORE_INT" >> $GITHUB_OUTPUT
