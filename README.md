@@ -43,6 +43,8 @@ jobs:
 | **`system_prompt`** | Path to the text file containing your agent's system instructions. | **Yes** | `prompts/system.txt` |
 | **`test_cases`** | Path to the JSON file containing input/output pairs. | **Yes** | `tests/expected.json` |
 | **`threshold`** | Minimum passing score (0-100). Fails build if lower. | No | `90` |
+| **`temperature`** | LLM Temperature | No | 0.0 |
+| **`repetitions`** | Number of times to run the tests to smooth out noise | No | 1 |
 
 ---
 
@@ -132,14 +134,3 @@ A JSON file containing the test cases. We support strict equality checks and "LL
 **Part of the [Maosproject Platform](https://www.google.com/search?q=https://maosproject.io) — The Control Plane for Autonomous Compute.**
 
 ---
-
-### Deployment Checklist
-
-1. Push `action.yml` (from previous step).
-2. Push this `README.md`.
-3. Tag the release:
-```bash
-git tag -a v1 -m "Launch v1"
-git push origin v1
-
-```
